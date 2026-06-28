@@ -118,7 +118,6 @@ class BeautyFaceAnalyzer:
 
         return {"泛红面积占比":red_ratio, "暗沉面积占比":dark_ratio}
 
-    # ==== 新增五官尺寸测算方法 ====
     # ==== 最终修复版五官尺寸测算方法 ====
     def calc_eye_nose_lip(self):
         # 眼部关键点
@@ -170,14 +169,44 @@ class BeautyFaceAnalyzer:
             "下唇厚度(占脸高)": round(float(lower_lip_h / self.h), 3),
             "人中长度(占脸高)": round(float(philtrum / self.h), 3)
         }
+
     def draw_all_landmark(self):
         draw_img = self.img.copy()
         pts_int = self.landmarks_2d.astype(np.int32)
-        for x,y in pts_int:
-            cv2.circle(draw_img, (x,y), 1, (0,255,0), -1)
+
+        # 1. 绘制全部绿色关键点
+        for x, y in pts_int:
+            cv2.circle(draw_img, (x, y), 1, (0, 255, 0), -1)
+
+        # 2. 绘制下颌外轮廓红线
         jaw_idx = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109]
         contour = self.landmarks_2d[jaw_idx].astype(np.int32)
-        cv2.polylines(draw_img, [contour], True, (0,0,255), 1)
+        cv2.polylines(draw_img, [contour], True, (0, 0, 255), 1)
+
+        # ========== 新增美学标准辅助线 ==========
+        h, w = self.h, self.w
+        fore_top_pt = self.get_point(PTS_IDX["top_forehead"])   # 额头最高点
+        chin_pt = self.get_point(PTS_IDX["bottom_chin"])       # 下巴最低点
+
+        # 1）面部中分对称竖线（蓝色）
+        mid_x = int(self.get_point(PTS_IDX["nose_top"])[0])
+        y_min = int(fore_top_pt[1])
+        y_max = int(chin_pt[1])
+        cv2.line(draw_img, (mid_x, y_min), (mid_x, y_max), (255, 0, 0), 1)
+
+        # 2）三庭分割水平线（橙色）
+        total_face_h = chin_pt[1] - fore_top_pt[1]
+        line_y1 = fore_top_pt[1] + total_face_h * (1/3)
+        line_y2 = fore_top_pt[1] + total_face_h * (2/3)
+        cv2.line(draw_img, (0, int(line_y1)), (w, int(line_y1)), (0, 165, 255), 1)
+        cv2.line(draw_img, (0, int(line_y2)), (w, int(line_y2)), (0, 165, 255), 1)
+
+        # 3）五眼等分竖线（紫色）
+        single_eye_w = w / 5
+        for i in range(1, 5):
+            x_pos = int(single_eye_w * i)
+            cv2.line(draw_img, (x_pos, 0), (x_pos, h), (200, 0, 200), 1)
+
         return draw_img
 
 if __name__ == "__main__":
@@ -193,7 +222,7 @@ if __name__ == "__main__":
             res1 = analyzer.calc_three_court_five_eye()
             res2 = analyzer.calc_symmetry_score()
             res3 = analyzer.skin_region_analysis()
-            res4 = analyzer.calc_eye_nose_lip() # 调用五官测算
+            res4 = analyzer.calc_eye_nose_lip()
             print("三庭五眼：", res1)
             print("面部对称：", res2)
             print("皮肤检测：", res3)
