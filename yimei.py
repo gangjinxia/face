@@ -311,6 +311,7 @@ class BeautyFaceAnalyzer:
         }
 
     # 新增：综合颜值总分计算
+    # 新增：综合颜值总分计算
     def calc_total_beauty_score(self):
         shape_data = self.calc_three_court_five_eye()
         sym_data = self.calc_symmetry_score()
@@ -318,51 +319,53 @@ class BeautyFaceAnalyzer:
         eye_nose_lip = self.calc_eye_nose_lip()
         aging_data = self.calc_aging_depression()
 
-        # 1. 轮廓分 满分30
+        # ========== 1. 轮廓分 满分30 ==========
         five_eye = shape_data["五眼匹配度(理想值=1)"]
         sym = sym_data["面部对称得分(满分1)"]
-        t1,t2,t3 = shape_data["三庭比例(上/中/下)"]
-        three_court_err = abs(t1-0.333) + abs(t2-0.333) + abs(t3-0.333)
+        t1, t2, t3 = shape_data["三庭比例(上/中/下)"]
+        three_court_err = abs(t1 - 0.333) + abs(t2 - 0.333) + abs(t3 - 0.333)
         three_court_score = max(0, 1 - three_court_err)
         contour_raw = (five_eye * 0.4 + sym * 0.3 + three_court_score * 0.3)
         contour_score = round(contour_raw * 30, 1)
 
-        # 2. 五官协调分 满分30
+        # ========== 2. 五官协调分 满分30【已放宽容错】 ==========
         eye_w = eye_nose_lip["平均眼宽(占脸宽)"]
         eye_h = eye_nose_lip["单眼平均高度(占脸高)"]
         nose_w = eye_nose_lip["鼻翼宽度(占脸宽)"]
         up_lip = eye_nose_lip["上唇厚度(占脸高)"]
         down_lip = eye_nose_lip["下唇厚度(占脸高)"]
-        err_eye = abs(eye_w - 0.09) + abs(eye_h - 0.028)
-        err_nose = abs(nose_w - 0.28)
-        err_lip = abs((down_lip/up_lip) - 1.2) if up_lip>0 else 0.3
+
+        err_eye = abs(eye_w - 0.085) + abs(eye_h - 0.024)
+        err_nose = abs(nose_w - 0.33)
+        err_lip = abs((down_lip / up_lip) - 1.3) if up_lip > 0 else 0.25
         total_err = err_eye + err_nose + err_lip
-        face_feature_raw = max(0, 1 - total_err / 0.5)
+        face_feature_raw = max(0, 1 - total_err / 1.2)
         feature_score = round(face_feature_raw * 30, 1)
 
-        # 3. 肤质分 满分20
+        # ========== 3. 肤质分 满分20 ==========
         red = skin_data["泛红面积占比"]
         oil = skin_data["出油高光占比"]
         spot = skin_data["色斑色素占比"]
         pore = skin_data["毛孔粗糙占比"]
         dry_line = skin_data["干纹缺水占比"]
-        skin_err = red*0.4 + oil*0.3 + spot*0.1 + pore*0.1 + dry_line*0.1
+        skin_err = red * 0.4 + oil * 0.3 + spot * 0.1 + pore * 0.1 + dry_line * 0.1
         skin_raw = max(0, 1 - skin_err)
         skin_score = round(skin_raw * 20, 1)
 
-        # 4. 衰老纹路扣分 最高扣20
+        # ========== 4. 衰老纹路总扣分 最高扣20 ==========
         wrinkle_sum = (
-            aging_data["泪沟凹陷程度(0-0.8越高越深)"] +
-            aging_data["法令纹凹陷程度(0-0.8越深越重)"] +
-            aging_data["额头横纹深度(0-0.8越深越多)"] +
-            aging_data["鱼尾纹深浅指数(0-0.8越深越多)"] +
-            aging_data["木偶纹凹陷程度(0-0.8越深越重)"] +
-            aging_data["眉间川字纹深度(0-0.8越深越多)"]
+                aging_data["泪沟凹陷程度(0-0.8越高越深)"] +
+                aging_data["法令纹凹陷程度(0-0.8越深越重)"] +
+                aging_data["额头横纹深度(0-0.8越深越多)"] +
+                aging_data["鱼尾纹深浅指数(0-0.8越深越多)"] +
+                aging_data["木偶纹凹陷程度(0-0.8越深越重)"] +
+                aging_data["眉间川字纹深度(0-0.8越深越多)"]
         )
         sag = aging_data["面部软组织下垂指数(0-1越高越松弛)"]
         total_wrinkle = wrinkle_sum * 0.7 + sag * 0.3
         wrinkle_deduct = min(20, round(total_wrinkle * 20, 1))
 
+        # 总分计算
         total = contour_score + feature_score + skin_score - wrinkle_deduct
         total_clamp = round(max(0, min(100, total)), 1)
 
@@ -373,7 +376,6 @@ class BeautyFaceAnalyzer:
             "衰老纹路总扣分项(最高扣20)": wrinkle_deduct,
             "综合颜值总分(0-100)": total_clamp
         }
-
     def draw_all_landmark(self):
         draw_img = self.img.copy()
         pts_int = self.landmarks_2d.astype(np.int32)
