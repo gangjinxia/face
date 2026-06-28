@@ -226,30 +226,24 @@ class BeautyFaceAnalyzer:
             "下颌宽/颧骨宽比值": round(float(jaw_cheek_ratio), 3)
         }
 
-    # 新增：泪沟、法令纹、软组织下垂、额头横纹、鱼尾纹、木偶纹、川字纹衰老量化
     def calc_aging_depression(self):
         h, w = self.h, self.w
         gray = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
-        # 提取纹理层：原图减模糊图，只保留凹凸纹路，抵消粉底肤色光照
-        blur_gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        blur_gray = cv2.GaussianBlur(gray, (5,5), 0)
         texture = cv2.absdiff(gray, blur_gray)
         mask = np.zeros((h, w), dtype=np.uint8)
-        jaw_idx = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148,
-                   176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109]
+        jaw_idx = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109]
         contour = self.landmarks_2d[jaw_idx].astype(np.int32)
         cv2.fillPoly(mask, [contour], 255)
 
         def get_wrinkle_score(roi_poly):
-            """内部工具：输入多边形，返回0~0.8真实纹路指数"""
-            r_mask = np.zeros((h, w), np.uint8)
+            r_mask = np.zeros((h,w), np.uint8)
             cv2.fillPoly(r_mask, [roi_poly], 255)
             roi_tex = cv2.bitwise_and(texture, texture, mask=r_mask & mask)
-            # 用纹理标准差代表纹路凹凸程度，不受肤色影响
-            tex_std = np.std(roi_tex[roi_tex > 0])
+            tex_std = np.std(roi_tex[roi_tex>0])
             score = np.clip(tex_std / 32, 0, 0.8)
             return round(float(score), 3)
 
-        # 1. 泪沟（缩小ROI，只取眶下凹陷窄条）
         left_eye_inner = self.get_point(33)
         left_cheek_up = self.get_point(234)
         right_eye_inner = self.get_point(263)
@@ -258,7 +252,6 @@ class BeautyFaceAnalyzer:
         right_lacrimal_pts = np.array([right_eye_inner, self.get_point(374), right_cheek_up], np.int32)
         lacrimal_score = get_wrinkle_score(np.concatenate([left_lacrimal_pts, right_lacrimal_pts]))
 
-        # 2. 法令纹
         nose_left = self.get_point(234)
         mouth_left = self.get_point(61)
         nose_right = self.get_point(454)
@@ -267,7 +260,6 @@ class BeautyFaceAnalyzer:
         right_nasolabial = np.array([nose_right, self.get_point(4), mouth_right], np.int32)
         nasolabial_score = get_wrinkle_score(np.concatenate([left_nasolabial, right_nasolabial]))
 
-        # 3. 面部软组织下垂度（不变，点位偏移逻辑不受肤色影响）
         brow_mid = self.get_point(PTS_IDX["brow_top"])
         cheek_mid_left = self.get_point(234)
         cheek_mid_right = self.get_point(454)
@@ -280,7 +272,6 @@ class BeautyFaceAnalyzer:
         avg_cheek_offset = (cheek_left_offset + cheek_right_offset) / 2
         sag_score = round(float((brow_offset + avg_cheek_offset) / 2), 3)
 
-        # 4. 额头横纹
         fore_left = self.get_point(234)
         fore_right = self.get_point(454)
         fore_top = self.get_point(10)
@@ -288,14 +279,12 @@ class BeautyFaceAnalyzer:
         fore_pts = np.array([fore_left, fore_right, fore_mid, fore_top], np.int32)
         forehead_wrinkle = get_wrinkle_score(fore_pts)
 
-        # 5. 鱼尾纹
         left_eye_out = self.get_point(133)
         right_eye_out = self.get_point(263)
         left_tail = np.array([left_eye_out, self.get_point(145), self.get_point(159)], np.int32)
         right_tail = np.array([right_eye_out, self.get_point(374), self.get_point(386)], np.int32)
         crow_feet = get_wrinkle_score(np.concatenate([left_tail, right_tail]))
 
-        # 6. 木偶纹
         mouth_left = self.get_point(61)
         mouth_right = self.get_point(291)
         jaw_left = self.get_point(58)
@@ -304,7 +293,6 @@ class BeautyFaceAnalyzer:
         right_puppet = np.array([mouth_right, jaw_right, self.get_point(17)], np.int32)
         puppet_wrinkle = get_wrinkle_score(np.concatenate([left_puppet, right_puppet]))
 
-        # 7. 眉间川字纹
         glabala_left = self.get_point(33)
         glabala_right = self.get_point(263)
         glabala_top = self.get_point(9)
@@ -321,6 +309,71 @@ class BeautyFaceAnalyzer:
             "木偶纹凹陷程度(0-0.8越深越重)": puppet_wrinkle,
             "眉间川字纹深度(0-0.8越深越多)": glabala_wrinkle
         }
+
+    # 新增：综合颜值总分计算
+    def calc_total_beauty_score(self):
+        shape_data = self.calc_three_court_five_eye()
+        sym_data = self.calc_symmetry_score()
+        skin_data = self.skin_region_analysis()
+        eye_nose_lip = self.calc_eye_nose_lip()
+        aging_data = self.calc_aging_depression()
+
+        # 1. 轮廓分 满分30
+        five_eye = shape_data["五眼匹配度(理想值=1)"]
+        sym = sym_data["面部对称得分(满分1)"]
+        t1,t2,t3 = shape_data["三庭比例(上/中/下)"]
+        three_court_err = abs(t1-0.333) + abs(t2-0.333) + abs(t3-0.333)
+        three_court_score = max(0, 1 - three_court_err)
+        contour_raw = (five_eye * 0.4 + sym * 0.3 + three_court_score * 0.3)
+        contour_score = round(contour_raw * 30, 1)
+
+        # 2. 五官协调分 满分30
+        eye_w = eye_nose_lip["平均眼宽(占脸宽)"]
+        eye_h = eye_nose_lip["单眼平均高度(占脸高)"]
+        nose_w = eye_nose_lip["鼻翼宽度(占脸宽)"]
+        up_lip = eye_nose_lip["上唇厚度(占脸高)"]
+        down_lip = eye_nose_lip["下唇厚度(占脸高)"]
+        err_eye = abs(eye_w - 0.09) + abs(eye_h - 0.028)
+        err_nose = abs(nose_w - 0.28)
+        err_lip = abs((down_lip/up_lip) - 1.2) if up_lip>0 else 0.3
+        total_err = err_eye + err_nose + err_lip
+        face_feature_raw = max(0, 1 - total_err / 0.5)
+        feature_score = round(face_feature_raw * 30, 1)
+
+        # 3. 肤质分 满分20
+        red = skin_data["泛红面积占比"]
+        oil = skin_data["出油高光占比"]
+        spot = skin_data["色斑色素占比"]
+        pore = skin_data["毛孔粗糙占比"]
+        dry_line = skin_data["干纹缺水占比"]
+        skin_err = red*0.4 + oil*0.3 + spot*0.1 + pore*0.1 + dry_line*0.1
+        skin_raw = max(0, 1 - skin_err)
+        skin_score = round(skin_raw * 20, 1)
+
+        # 4. 衰老纹路扣分 最高扣20
+        wrinkle_sum = (
+            aging_data["泪沟凹陷程度(0-0.8越高越深)"] +
+            aging_data["法令纹凹陷程度(0-0.8越深越重)"] +
+            aging_data["额头横纹深度(0-0.8越深越多)"] +
+            aging_data["鱼尾纹深浅指数(0-0.8越深越多)"] +
+            aging_data["木偶纹凹陷程度(0-0.8越深越重)"] +
+            aging_data["眉间川字纹深度(0-0.8越深越多)"]
+        )
+        sag = aging_data["面部软组织下垂指数(0-1越高越松弛)"]
+        total_wrinkle = wrinkle_sum * 0.7 + sag * 0.3
+        wrinkle_deduct = min(20, round(total_wrinkle * 20, 1))
+
+        total = contour_score + feature_score + skin_score - wrinkle_deduct
+        total_clamp = round(max(0, min(100, total)), 1)
+
+        return {
+            "轮廓得分(满分30)": contour_score,
+            "五官协调得分(满分30)": feature_score,
+            "肤质得分(满分20)": skin_score,
+            "衰老纹路总扣分项(最高扣20)": wrinkle_deduct,
+            "综合颜值总分(0-100)": total_clamp
+        }
+
     def draw_all_landmark(self):
         draw_img = self.img.copy()
         pts_int = self.landmarks_2d.astype(np.int32)
@@ -370,12 +423,14 @@ if __name__ == "__main__":
             res4 = analyzer.calc_eye_nose_lip()
             res5 = analyzer.calc_face_shape()
             res6 = analyzer.calc_aging_depression()
+            res7 = analyzer.calc_total_beauty_score()
             print("三庭五眼：", res1)
             print("面部对称：", res2)
             print("皮肤检测：", res3)
             print("五官比例数据：", res4)
             print("脸型分析：", res5)
             print("衰老松弛纹路检测：", res6)
+            print("综合颜值打分：", res7)
             show_img = analyzer.draw_all_landmark()
             cv2.imshow("医美人脸网格分析", show_img)
             cv2.waitKey(0)
