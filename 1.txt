@@ -9,7 +9,7 @@ def face_analysis(img: np.ndarray) -> tuple[np.ndarray, list]:
     """
     人脸分析主函数
     :param img: 输入图像 ndarray (BGR格式)
-    :return: 绘制人脸框后的图像ndarray, 所有人脸坐标列表
+    :return: 绘制人脸框后的图像ndarray, 裁剪后的人脸ndarray列表
     """
     # 1. 加载人脸检测器（OpenCV内置Haar分类器）
     face_cascade = cv2.CascadeClassifier(
