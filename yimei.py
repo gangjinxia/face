@@ -230,109 +230,97 @@ class BeautyFaceAnalyzer:
     def calc_aging_depression(self):
         h, w = self.h, self.w
         gray = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
+        # 提取纹理层：原图减模糊图，只保留凹凸纹路，抵消粉底肤色光照
+        blur_gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        texture = cv2.absdiff(gray, blur_gray)
         mask = np.zeros((h, w), dtype=np.uint8)
-        jaw_idx = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109]
+        jaw_idx = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148,
+                   176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109]
         contour = self.landmarks_2d[jaw_idx].astype(np.int32)
         cv2.fillPoly(mask, [contour], 255)
 
-        # ========== 1. 泪沟区域 ==========
+        def get_wrinkle_score(roi_poly):
+            """内部工具：输入多边形，返回0~0.8真实纹路指数"""
+            r_mask = np.zeros((h, w), np.uint8)
+            cv2.fillPoly(r_mask, [roi_poly], 255)
+            roi_tex = cv2.bitwise_and(texture, texture, mask=r_mask & mask)
+            # 用纹理标准差代表纹路凹凸程度，不受肤色影响
+            tex_std = np.std(roi_tex[roi_tex > 0])
+            score = np.clip(tex_std / 32, 0, 0.8)
+            return round(float(score), 3)
+
+        # 1. 泪沟（缩小ROI，只取眶下凹陷窄条）
         left_eye_inner = self.get_point(33)
         left_cheek_up = self.get_point(234)
         right_eye_inner = self.get_point(263)
         right_cheek_up = self.get_point(454)
         left_lacrimal_pts = np.array([left_eye_inner, self.get_point(145), left_cheek_up], np.int32)
         right_lacrimal_pts = np.array([right_eye_inner, self.get_point(374), right_cheek_up], np.int32)
-        lacrimal_mask = np.zeros((h,w), np.uint8)
-        cv2.fillPoly(lacrimal_mask, [left_lacrimal_pts, right_lacrimal_pts], 255)
-        lacrimal_roi = cv2.bitwise_and(gray, gray, mask=lacrimal_mask & mask)
-        lacrimal_mean = cv2.mean(lacrimal_roi)[0]
-        lacrimal_score = round(float((128 - lacrimal_mean) / 128), 3)
+        lacrimal_score = get_wrinkle_score(np.concatenate([left_lacrimal_pts, right_lacrimal_pts]))
 
-        # ========== 2. 法令纹区域 ==========
+        # 2. 法令纹
         nose_left = self.get_point(234)
         mouth_left = self.get_point(61)
         nose_right = self.get_point(454)
         mouth_right = self.get_point(291)
         left_nasolabial = np.array([nose_left, self.get_point(1), mouth_left], np.int32)
         right_nasolabial = np.array([nose_right, self.get_point(4), mouth_right], np.int32)
-        nasolabial_mask = np.zeros((h,w), np.uint8)
-        cv2.fillPoly(nasolabial_mask, [left_nasolabial, right_nasolabial], 255)
-        nl_roi = cv2.bitwise_and(gray, gray, mask=nasolabial_mask & mask)
-        nl_mean = cv2.mean(nl_roi)[0]
-        nasolabial_score = round(float((128 - nl_mean) / 128), 3)
+        nasolabial_score = get_wrinkle_score(np.concatenate([left_nasolabial, right_nasolabial]))
 
-        # ========== 3. 面部软组织下垂度（基准年轻点位偏移） ==========
+        # 3. 面部软组织下垂度（不变，点位偏移逻辑不受肤色影响）
         brow_mid = self.get_point(PTS_IDX["brow_top"])
         cheek_mid_left = self.get_point(234)
         cheek_mid_right = self.get_point(454)
         chin_mid = self.get_point(PTS_IDX["bottom_chin"])
         face_top = self.get_point(PTS_IDX["top_forehead"])
         full_h = chin_mid[1] - face_top[1]
-
         brow_offset = abs(brow_mid[1] - (face_top[1] + full_h * 0.12)) / full_h
         cheek_left_offset = abs(cheek_mid_left[1] - (face_top[1] + full_h * 0.42)) / full_h
         cheek_right_offset = abs(cheek_mid_right[1] - (face_top[1] + full_h * 0.42)) / full_h
         avg_cheek_offset = (cheek_left_offset + cheek_right_offset) / 2
         sag_score = round(float((brow_offset + avg_cheek_offset) / 2), 3)
 
-        # ========== 4. 额头横纹 ==========
+        # 4. 额头横纹
         fore_left = self.get_point(234)
         fore_right = self.get_point(454)
         fore_top = self.get_point(10)
         fore_mid = self.get_point(9)
         fore_pts = np.array([fore_left, fore_right, fore_mid, fore_top], np.int32)
-        fore_mask = np.zeros((h,w), np.uint8)
-        cv2.fillPoly(fore_mask, [fore_pts], 255)
-        fore_roi = cv2.bitwise_and(gray, gray, mask=fore_mask & mask)
-        fore_mean = cv2.mean(fore_roi)[0]
-        forehead_wrinkle = round(float((128 - fore_mean) / 128), 3)
+        forehead_wrinkle = get_wrinkle_score(fore_pts)
 
-        # ========== 5. 鱼尾纹（外眼角外侧） ==========
+        # 5. 鱼尾纹
         left_eye_out = self.get_point(133)
         right_eye_out = self.get_point(263)
         left_tail = np.array([left_eye_out, self.get_point(145), self.get_point(159)], np.int32)
         right_tail = np.array([right_eye_out, self.get_point(374), self.get_point(386)], np.int32)
-        tail_mask = np.zeros((h,w), np.uint8)
-        cv2.fillPoly(tail_mask, [left_tail, right_tail], 255)
-        tail_roi = cv2.bitwise_and(gray, gray, mask=tail_mask & mask)
-        tail_mean = cv2.mean(tail_roi)[0]
-        crow_feet = round(float((128 - tail_mean) / 128), 3)
+        crow_feet = get_wrinkle_score(np.concatenate([left_tail, right_tail]))
 
-        # ========== 6. 木偶纹（嘴角下方） ==========
+        # 6. 木偶纹
         mouth_left = self.get_point(61)
         mouth_right = self.get_point(291)
         jaw_left = self.get_point(58)
         jaw_right = self.get_point(291)
         left_puppet = np.array([mouth_left, jaw_left, self.get_point(17)], np.int32)
         right_puppet = np.array([mouth_right, jaw_right, self.get_point(17)], np.int32)
-        puppet_mask = np.zeros((h,w), np.uint8)
-        cv2.fillPoly(puppet_mask, [left_puppet, right_puppet], 255)
-        puppet_roi = cv2.bitwise_and(gray, gray, mask=puppet_mask & mask)
-        puppet_mean = cv2.mean(puppet_roi)[0]
-        puppet_wrinkle = round(float((128 - puppet_mean) / 128), 3)
+        puppet_wrinkle = get_wrinkle_score(np.concatenate([left_puppet, right_puppet]))
 
-        # ========== 7. 眉间川字纹（新增） ==========
+        # 7. 眉间川字纹
         glabala_left = self.get_point(33)
         glabala_right = self.get_point(263)
         glabala_top = self.get_point(9)
         glabala_bottom = self.get_point(1)
         glabala_pts = np.array([glabala_left, glabala_right, glabala_bottom, glabala_top], np.int32)
-        glabala_mask = np.zeros((h,w), np.uint8)
-        cv2.fillPoly(glabala_mask, [glabala_pts], 255)
-        glabala_roi = cv2.bitwise_and(gray, gray, mask=glabala_mask & mask)
-        glabala_mean = cv2.mean(glabala_roi)[0]
-        glabala_wrinkle = round(float((128 - glabala_mean) / 128), 3)
+        glabala_wrinkle = get_wrinkle_score(glabala_pts)
 
         return {
-            "泪沟凹陷程度(0-1越高越深)": lacrimal_score,
-            "法令纹凹陷程度(0-1越深越重)": nasolabial_score,
+            "泪沟凹陷程度(0-0.8越高越深)": lacrimal_score,
+            "法令纹凹陷程度(0-0.8越深越重)": nasolabial_score,
             "面部软组织下垂指数(0-1越高越松弛)": sag_score,
-            "额头横纹深度(0-1越深越多)": forehead_wrinkle,
-            "鱼尾纹深浅指数(0-1越深越多)": crow_feet,
-            "木偶纹凹陷程度(0-1越深越重)": puppet_wrinkle,
-            "眉间川字纹深度(0-1越深越多)": glabala_wrinkle
+            "额头横纹深度(0-0.8越深越多)": forehead_wrinkle,
+            "鱼尾纹深浅指数(0-0.8越深越多)": crow_feet,
+            "木偶纹凹陷程度(0-0.8越深越重)": puppet_wrinkle,
+            "眉间川字纹深度(0-0.8越深越多)": glabala_wrinkle
         }
-
     def draw_all_landmark(self):
         draw_img = self.img.copy()
         pts_int = self.landmarks_2d.astype(np.int32)
