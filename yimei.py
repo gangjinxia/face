@@ -111,6 +111,7 @@ class BeautyFaceAnalyzer:
             return {
                 "泛红面积占比": 0.0, "暗沉面积占比": 0.0,
                 "黄褐斑占比": 0.0, "晒斑占比": 0.0,
+                "痘印色素沉淀占比": 0.0,
                 "毛孔粗糙占比": 0.0, "出油高光占比": 0.0, "干纹缺水占比": 0.0
             }
 
@@ -135,22 +136,33 @@ class BeautyFaceAnalyzer:
         mel_mask = cv2.inRange(skin_hsv, mel_low, mel_high) & mask
         mel_mask = cv2.bitwise_xor(mel_mask, sun_mask)
 
+        # 5.痘印色素沉淀（新增：红褐痘印）
+        acne_mark_low = np.array([0, 30, 40])
+        acne_mark_high = np.array([25, 120, 140])
+        acne_mask = cv2.inRange(skin_hsv, acne_mark_low, acne_mark_high) & mask
+        # 剔除和泛红、黄褐斑、晒斑重叠区域，避免重复计算
+        acne_mask = cv2.bitwise_xor(acne_mask, red_mask)
+        acne_mask = cv2.bitwise_xor(acne_mask, mel_mask)
+        acne_mask = cv2.bitwise_xor(acne_mask, sun_mask)
+
         sun_pix = np.count_nonzero(sun_mask)
         mel_pix = np.count_nonzero(mel_mask)
+        acne_pix = np.count_nonzero(acne_mask)
         sun_ratio = round(float(sun_pix / total_skin), 3)
         mel_ratio = round(float(mel_pix / total_skin), 3)
+        acne_ratio = round(float(acne_pix / total_skin), 3)
 
-        # 5.出油高光
+        # 6.出油高光
         oil_mask = cv2.inRange(skin_hsv, (0, 0, 210), (180, 40, 255))
         oil_pix = np.count_nonzero(oil_mask & mask)
         oil_ratio = round(float(oil_pix / total_skin), 3)
 
-        # 6.干纹缺水
+        # 7.干纹缺水
         dry_line_mask = cv2.inRange(skin_hsv, (0, 0, 60), (180, 70, 130))
         dry_pix = np.count_nonzero(dry_line_mask & mask)
         dry_ratio = round(float(dry_pix / total_skin), 3)
 
-        # 7.毛孔粗糙
+        # 8.毛孔粗糙
         blur_gray = cv2.GaussianBlur(gray, (3, 3), 0)
         pore_mask = cv2.subtract(blur_gray, gray)
         _, pore_bin = cv2.threshold(pore_mask, 12, 255, cv2.THRESH_BINARY)
@@ -162,6 +174,7 @@ class BeautyFaceAnalyzer:
             "暗沉面积占比": dark_ratio,
             "黄褐斑占比": mel_ratio,
             "晒斑占比": sun_ratio,
+            "痘印色素沉淀占比": acne_ratio,
             "毛孔粗糙占比": pore_ratio,
             "出油高光占比": oil_ratio,
             "干纹缺水占比": dry_ratio
@@ -470,14 +483,16 @@ class BeautyFaceAnalyzer:
         face_feature_raw = max(0, 1 - total_err / 1.2)
         feature_score = round(face_feature_raw * 30, 1)
 
-        # ========== 3. 肤质分 满分20【修正色斑字段】 ==========
+        # ========== 3. 肤质分 满分20【新增痘印权重】 ==========
         red = skin_data["泛红面积占比"]
         oil = skin_data["出油高光占比"]
         mel = skin_data["黄褐斑占比"]
         sun = skin_data["晒斑占比"]
+        acne = skin_data["痘印色素沉淀占比"]
         pore = skin_data["毛孔粗糙占比"]
         dry_line = skin_data["干纹缺水占比"]
-        skin_err = red * 0.4 + oil * 0.2 + mel * 0.2 + sun * 0.1 + pore * 0.05 + dry_line * 0.05
+        # 痘印权重0.15，和晒斑区分
+        skin_err = red * 0.4 + oil * 0.2 + mel * 0.2 + acne * 0.15 + sun * 0.1 + pore * 0.05 + dry_line * 0.05
         skin_raw = max(0, 1 - skin_err)
         skin_score = round(skin_raw * 20, 1)
 
