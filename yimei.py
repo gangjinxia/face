@@ -1,7 +1,7 @@
 import os
 import time
 from io import BytesIO
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 # 屏蔽MediaPipe底层冗余日志
 os.environ['GLOG_minloglevel'] = '2'
 
@@ -12,21 +12,63 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from fpdf import FPDF
 
-# ===================== 终极兼容中文图片保存（替代cv2.imwrite，100%解决中文乱码） =====================
+# ===================== 1、图片保存：解决中文文件名乱码 =====================
 def save_cv_image_chinese(file_path: str, cv_img):
-    """
-    不依赖OpenCV底层写入，用PIL中转，全系统完美支持中文路径/中文文件名
-    """
-    # OpenCV BGR -> PIL RGB
     rgb_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
     pil_img = Image.fromarray(rgb_img)
-    # PIL原生支持UTF-8中文路径
     try:
         pil_img.save(file_path)
         return True
     except Exception as e:
         print(f"图片保存失败：{e}")
         return False
+
+# ===================== 2、图像绘制中文：解决画面文字乱码核心函数 =====================
+def draw_chinese_text(cv_img, text_list, start_y, line_gap=26, font_size=14, white_stroke=True):
+    """
+    cv_img: opencv BGR图像
+    text_list: 文本行列表
+    start_y: 起始Y坐标
+    返回绘制完成后的BGR图像
+    """
+    h, w = cv_img.shape[:2]
+    # OpenCV BGR → PIL RGB
+    pil_img = Image.fromarray(cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(pil_img)
+
+    # 自动匹配系统中文字体
+    font = None
+    font_paths = []
+    if os.name == "nt":
+        # Windows
+        font_paths = [r"C:\Windows\Fonts\msyh.ttc", r"C:\Windows\Fonts\simhei.ttf"]
+    else:
+        # Mac / Linux
+        font_paths = [
+            "/System/Library/Fonts/PingFang.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"
+        ]
+    for fp in font_paths:
+        if os.path.exists(fp):
+            font = ImageFont.truetype(fp, font_size)
+            break
+    # 兜底无中文字体
+    if font is None:
+        font = ImageFont.load_default()
+
+    y = start_y
+    for line in text_list:
+        # 白色描边防遮挡
+        if white_stroke:
+            for offset_x in [-1, 0, 1]:
+                for offset_y in [-1, 0, 1]:
+                    draw.text((20 + offset_x, y + offset_y), line, font=font, fill=(0, 0, 0))
+        # 主文字白色
+        draw.text((20, y), line, font=font, fill=(255, 255, 255))
+        y += line_gap
+
+    # PIL RGB 转回 OpenCV BGR
+    return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
 # 人脸检测器初始化
 base_options = python.BaseOptions(model_asset_path="face_landmarker.task")
@@ -536,7 +578,6 @@ class BeautyFaceAnalyzer:
 
     def generate_report_img(self, save_path="report_face.jpg"):
         draw_img = self.draw_all_landmark()
-        h, w = draw_img.shape[:2]
         d1 = self.calc_three_court_five_eye()
         d2 = self.calc_symmetry_score()
         d3 = self.skin_region_analysis()
@@ -560,17 +601,13 @@ class BeautyFaceAnalyzer:
             f"泪沟：{d6['泪沟凹陷程度(0-0.8越高越深)']} 法令纹：{d6['法令纹凹陷程度(0-0.8越深越重)']}",
             f"鱼尾纹：{d6['鱼尾纹深浅指数(0-0.8越深越多)']} 川字纹：{d6['眉间川字纹深度(0-0.8越深越多)']}"
         ]
-        y_off = 30
-        for line in text_lines:
-            cv2.putText(draw_img, line, (20, y_off), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
-            cv2.putText(draw_img, line, (20, y_off), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 1)
-            y_off += 26
+        # 替换为PIL绘制中文，彻底删除cv2.putText
+        draw_img = draw_chinese_text(draw_img, text_lines, start_y=30, line_gap=26, font_size=14)
 
         save_path = save_path.replace("\\", "/")
         dir_path = os.path.dirname(save_path)
         if dir_path and not os.path.exists(dir_path):
             os.makedirs(dir_path)
-        # 替换为PIL保存，彻底解决中文乱码
         success = save_cv_image_chinese(save_path, draw_img)
         if success:
             print(f"[成功] 标注图已保存：{save_path}")
@@ -657,7 +694,6 @@ class BeautyFaceAnalyzer:
         pdf = FPDF()
         pdf.add_page()
         font_ok = False
-        # 多系统字体路径轮询
         font_paths = []
         if os.name == "nt":
             font_paths = [
@@ -665,13 +701,11 @@ class BeautyFaceAnalyzer:
                 ("simhei", r"C:\Windows\Fonts\simhei.ttf")
             ]
         else:
-            # Linux / Mac
             font_paths = [
                 ("wqy", "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
                 ("pingfang", "/System/Library/Fonts/PingFang.ttc"),
                 ("stheitisc", "/Library/Fonts/STHeitiMedium.ttc")
             ]
-        # 遍历加载可用字体
         for font_name, font_path in font_paths:
             try:
                 if os.path.exists(font_path):
@@ -681,7 +715,6 @@ class BeautyFaceAnalyzer:
                     break
             except:
                 continue
-        # 兜底无中文字体
         if not font_ok:
             pdf.set_font("DejaVuSans", size=11)
 
@@ -701,7 +734,6 @@ class BeautyFaceAnalyzer:
         out_dir = out_dir.replace("\\", "/")
         if not os.path.exists(out_dir):
             os.makedirs(out_dir)
-        # 完整中文文件名保留
         img_path = os.path.join(out_dir, f"面诊标注图_{stamp}.jpg")
         txt_path = os.path.join(out_dir, f"面诊文字报告_{stamp}.txt")
         pdf_path = os.path.join(out_dir, f"面诊标准化报告_{stamp}.pdf")
@@ -715,7 +747,8 @@ class BeautyFaceAnalyzer:
         return {"img": p1, "txt": p2, "pdf": p3}
 
 if __name__ == "__main__":
-    # 先安装依赖：pip install opencv-python mediapipe fpdf pillow numpy
+    # 安装依赖
+    # pip install opencv-python mediapipe fpdf pillow numpy
     image = cv2.imread("wanqian.webp")
     if image is None:
         print("图片读取失败，请把 wanqian.webp 放到代码同目录")
