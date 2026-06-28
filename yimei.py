@@ -226,7 +226,7 @@ class BeautyFaceAnalyzer:
             "下颌宽/颧骨宽比值": round(float(jaw_cheek_ratio), 3)
         }
 
-    # 新增：泪沟、法令纹、软组织下垂衰老量化
+    # 新增：泪沟、法令纹、软组织下垂、额头横纹、鱼尾纹、木偶纹衰老量化
     def calc_aging_depression(self):
         h, w = self.h, self.w
         gray = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
@@ -235,7 +235,7 @@ class BeautyFaceAnalyzer:
         contour = self.landmarks_2d[jaw_idx].astype(np.int32)
         cv2.fillPoly(mask, [contour], 255)
 
-        # 泪沟区域
+        # ========== 1. 泪沟区域 ==========
         left_eye_inner = self.get_point(33)
         left_cheek_up = self.get_point(234)
         right_eye_inner = self.get_point(263)
@@ -248,7 +248,7 @@ class BeautyFaceAnalyzer:
         lacrimal_mean = cv2.mean(lacrimal_roi)[0]
         lacrimal_score = round(float((128 - lacrimal_mean) / 128), 3)
 
-        # 法令纹区域
+        # ========== 2. 法令纹区域 ==========
         nose_left = self.get_point(234)
         mouth_left = self.get_point(61)
         nose_right = self.get_point(454)
@@ -261,7 +261,7 @@ class BeautyFaceAnalyzer:
         nl_mean = cv2.mean(nl_roi)[0]
         nasolabial_score = round(float((128 - nl_mean) / 128), 3)
 
-        # 软组织下垂
+        # ========== 3. 面部软组织下垂度（基准年轻点位偏移） ==========
         brow_mid = self.get_point(PTS_IDX["brow_top"])
         cheek_mid_left = self.get_point(234)
         cheek_mid_right = self.get_point(454)
@@ -269,16 +269,58 @@ class BeautyFaceAnalyzer:
         face_top = self.get_point(PTS_IDX["top_forehead"])
         full_h = chin_mid[1] - face_top[1]
 
+        # 眉下垂偏移
         brow_offset = abs(brow_mid[1] - (face_top[1] + full_h * 0.12)) / full_h
+        # 苹果肌下垂偏移
         cheek_left_offset = abs(cheek_mid_left[1] - (face_top[1] + full_h * 0.42)) / full_h
         cheek_right_offset = abs(cheek_mid_right[1] - (face_top[1] + full_h * 0.42)) / full_h
         avg_cheek_offset = (cheek_left_offset + cheek_right_offset) / 2
+
         sag_score = round(float((brow_offset + avg_cheek_offset) / 2), 3)
+
+        # ========== 4. 额头横纹 ==========
+        fore_left = self.get_point(234)
+        fore_right = self.get_point(454)
+        fore_top = self.get_point(10)
+        fore_mid = self.get_point(9)
+        fore_pts = np.array([fore_left, fore_right, fore_mid, fore_top], np.int32)
+        fore_mask = np.zeros((h,w), np.uint8)
+        cv2.fillPoly(fore_mask, [fore_pts], 255)
+        fore_roi = cv2.bitwise_and(gray, gray, mask=fore_mask & mask)
+        fore_mean = cv2.mean(fore_roi)[0]
+        forehead_wrinkle = round(float((128 - fore_mean) / 128), 3)
+
+        # ========== 5. 鱼尾纹（外眼角外侧） ==========
+        left_eye_out = self.get_point(133)
+        right_eye_out = self.get_point(263)
+        left_tail = np.array([left_eye_out, self.get_point(145), self.get_point(159)], np.int32)
+        right_tail = np.array([right_eye_out, self.get_point(374), self.get_point(386)], np.int32)
+        tail_mask = np.zeros((h,w), np.uint8)
+        cv2.fillPoly(tail_mask, [left_tail, right_tail], 255)
+        tail_roi = cv2.bitwise_and(gray, gray, mask=tail_mask & mask)
+        tail_mean = cv2.mean(tail_roi)[0]
+        crow_feet = round(float((128 - tail_mean) / 128), 3)
+
+        # ========== 6. 木偶纹（嘴角下方） ==========
+        mouth_left = self.get_point(61)
+        mouth_right = self.get_point(291)
+        jaw_left = self.get_point(58)
+        jaw_right = self.get_point(291)
+        left_puppet = np.array([mouth_left, jaw_left, self.get_point(17)], np.int32)
+        right_puppet = np.array([mouth_right, jaw_right, self.get_point(17)], np.int32)
+        puppet_mask = np.zeros((h,w), np.uint8)
+        cv2.fillPoly(puppet_mask, [left_puppet, right_puppet], 255)
+        puppet_roi = cv2.bitwise_and(gray, gray, mask=puppet_mask & mask)
+        puppet_mean = cv2.mean(puppet_roi)[0]
+        puppet_wrinkle = round(float((128 - puppet_mean) / 128), 3)
 
         return {
             "泪沟凹陷程度(0-1越高越深)": lacrimal_score,
             "法令纹凹陷程度(0-1越深越重)": nasolabial_score,
-            "面部软组织下垂指数(0-1越高越松弛)": sag_score
+            "面部软组织下垂指数(0-1越高越松弛)": sag_score,
+            "额头横纹深度(0-1越深越多)": forehead_wrinkle,
+            "鱼尾纹深浅指数(0-1越深越多)": crow_feet,
+            "木偶纹凹陷程度(0-1越深越重)": puppet_wrinkle
         }
 
     def draw_all_landmark(self):
@@ -335,7 +377,7 @@ if __name__ == "__main__":
             print("皮肤检测：", res3)
             print("五官比例数据：", res4)
             print("脸型分析：", res5)
-            print("衰老松弛检测：", res6)
+            print("衰老松弛纹路检测：", res6)
             show_img = analyzer.draw_all_landmark()
             cv2.imshow("医美人脸网格分析", show_img)
             cv2.waitKey(0)
