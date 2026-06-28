@@ -1,8 +1,7 @@
 import os
 import time
-from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
-# 屏蔽MediaPipe底层冗余日志
+# 屏蔽MediaPipe冗余日志
 os.environ['GLOG_minloglevel'] = '2'
 
 import cv2
@@ -12,7 +11,7 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from fpdf import FPDF
 
-# ===================== 1、图片保存：解决中文文件名乱码 =====================
+# ===================== 图片保存：PIL中转，中文文件名不乱码 =====================
 def save_cv_image_chinese(file_path: str, cv_img):
     rgb_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
     pil_img = Image.fromarray(rgb_img)
@@ -23,27 +22,17 @@ def save_cv_image_chinese(file_path: str, cv_img):
         print(f"图片保存失败：{e}")
         return False
 
-# ===================== 2、图像绘制中文：解决画面文字乱码核心函数 =====================
+# ===================== 图像绘制中文：替代cv2.putText，画面无方块乱码 =====================
 def draw_chinese_text(cv_img, text_list, start_y, line_gap=26, font_size=14, white_stroke=True):
-    """
-    cv_img: opencv BGR图像
-    text_list: 文本行列表
-    start_y: 起始Y坐标
-    返回绘制完成后的BGR图像
-    """
     h, w = cv_img.shape[:2]
-    # OpenCV BGR → PIL RGB
     pil_img = Image.fromarray(cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(pil_img)
 
-    # 自动匹配系统中文字体
     font = None
     font_paths = []
     if os.name == "nt":
-        # Windows
         font_paths = [r"C:\Windows\Fonts\msyh.ttc", r"C:\Windows\Fonts\simhei.ttf"]
     else:
-        # Mac / Linux
         font_paths = [
             "/System/Library/Fonts/PingFang.ttc",
             "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"
@@ -52,22 +41,18 @@ def draw_chinese_text(cv_img, text_list, start_y, line_gap=26, font_size=14, whi
         if os.path.exists(fp):
             font = ImageFont.truetype(fp, font_size)
             break
-    # 兜底无中文字体
     if font is None:
         font = ImageFont.load_default()
 
     y = start_y
     for line in text_list:
-        # 白色描边防遮挡
         if white_stroke:
             for offset_x in [-1, 0, 1]:
                 for offset_y in [-1, 0, 1]:
                     draw.text((20 + offset_x, y + offset_y), line, font=font, fill=(0, 0, 0))
-        # 主文字白色
         draw.text((20, y), line, font=font, fill=(255, 255, 255))
         y += line_gap
 
-    # PIL RGB 转回 OpenCV BGR
     return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
 # 人脸检测器初始化
@@ -80,7 +65,7 @@ options = vision.FaceLandmarkerOptions(
 )
 detector = vision.FaceLandmarker.create_from_options(options)
 
-# 468关键点索引
+# 468人脸关键点索引
 PTS_IDX = {
     "left_eye_left": 33, "left_eye_right": 133,
     "right_eye_left": 362, "right_eye_right": 263,
@@ -127,13 +112,13 @@ class BeautyFaceAnalyzer:
         re_l = self.get_point(PTS_IDX["right_eye_left"])
         re_r = self.get_point(PTS_IDX["right_eye_right"])
 
-        mid_court = brow_top[1] - fore_top[1]
-        upper_court = nose_mid[1] - brow_top[1]
+        upper_court = brow_top[1] - fore_top[1]
+        mid_court = nose_mid[1] - brow_top[1]
         lower_court = chin_bottom[1] - nose_mid[1]
         total_h = chin_bottom[1] - fore_top[1]
 
-        ratio_up = round(float(mid_court / total_h), 3)
-        ratio_mid = round(float(upper_court / total_h), 3)
+        ratio_up = round(float(upper_court / total_h), 3)
+        ratio_mid = round(float(mid_court / total_h), 3)
         ratio_low = round(float(lower_court / total_h), 3)
 
         eye_w = np.linalg.norm(le_r - le_l)
@@ -506,8 +491,8 @@ class BeautyFaceAnalyzer:
         err_nose = abs(nose_w - 0.33)
         err_lip = abs((down_lip / up_lip) - 1.3) if up_lip > 0 else 0.25
         total_err = err_eye + err_nose + err_lip
-        face_feature_raw = max(0, 1 - total_err / 1.8)
-        feature_score = round(face_feature_raw * 30, 1)
+        feature_raw = max(0, 1 - total_err / 1.8)
+        feature_score = round(feature_raw * 30, 1)
 
         red = skin_data["泛红面积占比"]
         oil = skin_data["出油高光占比"]
@@ -548,7 +533,7 @@ class BeautyFaceAnalyzer:
         pts_int = self.landmarks_2d.astype(np.int32)
 
         for x, y in pts_int:
-            cv2.circle(draw_img, (x, y), 1, (0, 255, 0), -1)
+            cv2.circle(draw_img, (int(x), int(y)), 1, (0, 255, 0), -1)
 
         jaw_idx = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109]
         contour = self.landmarks_2d[jaw_idx].astype(np.int32)
@@ -601,7 +586,6 @@ class BeautyFaceAnalyzer:
             f"泪沟：{d6['泪沟凹陷程度(0-0.8越高越深)']} 法令纹：{d6['法令纹凹陷程度(0-0.8越深越重)']}",
             f"鱼尾纹：{d6['鱼尾纹深浅指数(0-0.8越深越多)']} 川字纹：{d6['眉间川字纹深度(0-0.8越深越多)']}"
         ]
-        # 替换为PIL绘制中文，彻底删除cv2.putText
         draw_img = draw_chinese_text(draw_img, text_lines, start_y=30, line_gap=26, font_size=14)
 
         save_path = save_path.replace("\\", "/")
@@ -615,7 +599,7 @@ class BeautyFaceAnalyzer:
             print(f"[失败] 标注图保存失败：{save_path}")
         return save_path
 
-    def save_txt_report(self, save_path="report_data.txt"):
+    def build_report_text(self):
         d1 = self.calc_three_court_five_eye()
         d2 = self.calc_symmetry_score()
         d3 = self.skin_region_analysis()
@@ -624,45 +608,53 @@ class BeautyFaceAnalyzer:
         d6 = self.calc_aging_depression()
         d7 = self.calc_total_beauty_score()
 
-        content = []
-        content.append("=" * 60)
-        content.append("                AI医美标准化面诊报告")
-        content.append("=" * 60)
-        content.append(f"脸型类型：{d5['脸型分类']}")
-        content.append(f"综合颜值总分：{d7['综合颜值总分(0-100)']} / 100")
-        content.append(f"轮廓分项得分(满分30)：{d7['轮廓得分(满分30)']}")
-        content.append(f"五官协调得分(满分30)：{d7['五官协调得分(满分30)']}")
-        content.append(f"肤质得分(满分20)：{d7['肤质得分(满分20)']}")
-        content.append(f"衰老纹路扣分值：{d7['衰老纹路总扣分项(最高扣20)']}")
-        content.append("\n【一、轮廓骨骼分析】")
-        content.append(f"三庭比例(上/中/下)：{d1['三庭比例(上/中/下)']}")
-        content.append(f"五眼匹配标准度：{d1['五眼匹配度(理想值=1)']}")
-        content.append(f"面部对称系数：{d2['面部对称得分(满分1)']}")
-        content.append(f"脸型比例 脸长/颧骨宽：{d5['脸长/颧骨宽比值']} 下颌/颧骨宽：{d5['下颌宽/颧骨宽比值']}")
-        content.append("\n【二、眼部量化数据】")
+        lines = []
+        lines.append("=" * 60)
+        lines.append("                AI医美标准化面诊报告")
+        lines.append("=" * 60)
+        lines.append(f"脸型类型：{d5['脸型分类']}")
+        lines.append(f"综合颜值总分：{d7['综合颜值总分(0-100)']} / 100")
+        lines.append(f"轮廓分项得分(满分30)：{d7['轮廓得分(满分30)']}")
+        lines.append(f"五官协调得分(满分30)：{d7['五官协调得分(满分30)']}")
+        lines.append(f"肤质得分(满分20)：{d7['肤质得分(满分20)']}")
+        lines.append(f"衰老纹路扣分值：{d7['衰老纹路总扣分项(最高扣20)']}")
+        lines.append("")
+        lines.append("【一、轮廓骨骼分析】")
+        lines.append(f"三庭比例(上/中/下)：{d1['三庭比例(上/中/下)']}")
+        lines.append(f"五眼匹配标准度：{d1['五眼匹配度(理想值=1)']}")
+        lines.append(f"面部对称系数：{d2['面部对称得分(满分1)']}")
+        lines.append(f"脸型比例 脸长/颧骨宽：{d5['脸长/颧骨宽比值']} 下颌/颧骨宽：{d5['下颌宽/颧骨宽比值']}")
+        lines.append("")
+        lines.append("【二、眼部量化数据】")
         for k, v in d4.items():
             if "眼" in k:
-                content.append(f"{k}：{v}")
-        content.append("\n【三、鼻部量化数据】")
+                lines.append(f"{k}：{v}")
+        lines.append("")
+        lines.append("【三、鼻部量化数据】")
         for k, v in d4.items():
             if "鼻" in k:
-                content.append(f"{k}：{v}")
-        content.append("\n【四、唇部量化数据】")
+                lines.append(f"{k}：{v}")
+        lines.append("")
+        lines.append("【四、唇部量化数据】")
         for k, v in d4.items():
             if "唇" in k or "人中" in k:
-                content.append(f"{k}：{v}")
-        content.append("\n【五、下颌骨骼量化】")
+                lines.append(f"{k}：{v}")
+        lines.append("")
+        lines.append("【五、下颌骨骼量化】")
         for k, v in d4.items():
             if "下颌" in k or "下巴" in k:
-                content.append(f"{k}：{v}")
-        content.append("\n【六、皮肤8项检测】")
+                lines.append(f"{k}：{v}")
+        lines.append("")
+        lines.append("【六、皮肤8项检测】")
         for k, v in d3.items():
-            content.append(f"{k}：{v}")
-        content.append("\n【七、全脸7处衰老纹路】")
+            lines.append(f"{k}：{v}")
+        lines.append("")
+        lines.append("【七、全脸7处衰老纹路】")
         for k, v in d6.items():
-            content.append(f"{k}：{v}")
-        content.append("\n" + "=" * 60)
-        content.append("改善建议总结：")
+            lines.append(f"{k}：{v}")
+        lines.append("")
+        lines.append("=" * 60)
+        lines.append("改善建议总结：")
         tips = []
         if d7["综合颜值总分(0-100)"] < 60:
             tips.append("整体多项基础条件偏差，建议联合轮廓+五官+皮肤综合改善")
@@ -683,16 +675,17 @@ class BeautyFaceAnalyzer:
         if d4["单眼平均高度(占脸高)"] < 0.022:
             tips.append("眼高不足，双眼皮+提肌放大双眼")
         if len(tips) == 0:
-            tips.append("基础条件良好，仅日常轻护理维持即可")
-        content.extend(tips)
-
-        with open(save_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(content))
-        return save_path
+            tips.append("基础条件良好，仅日常轻养护维持即可")
+        lines.extend(tips)
+        return "\n".join(lines)
 
     def save_pdf_report(self, save_path="report.pdf"):
-        pdf = FPDF()
+        pdf = FPDF(orientation="P", unit="mm", format="A4")
+        pdf.set_margins(left=15, top=15, right=15)
+        pdf.set_auto_page_break(auto=True, margin=15)
         pdf.add_page()
+
+        font_family = None
         font_ok = False
         font_paths = []
         if os.name == "nt":
@@ -706,27 +699,51 @@ class BeautyFaceAnalyzer:
                 ("pingfang", "/System/Library/Fonts/PingFang.ttc"),
                 ("stheitisc", "/Library/Fonts/STHeitiMedium.ttc")
             ]
+        # 同时加载常规"" 和加粗"B"，删除uni参数消除警告
         for font_name, font_path in font_paths:
             try:
                 if os.path.exists(font_path):
                     pdf.add_font(font_name, "", font_path)
-                    pdf.set_font(font_name, size=11)
+                    pdf.add_font(font_name, "B", font_path)
+                    font_family = font_name
                     font_ok = True
                     break
-            except:
+            except Exception as e:
                 continue
-        if not font_ok:
-            pdf.set_font("DejaVuSans", size=11)
 
-        tmp_txt = "tmp_report.txt"
-        self.save_txt_report(tmp_txt)
-        with open(tmp_txt, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        for line in lines:
-            pdf.multi_cell(190, 6, text=line.strip())
+        if not font_ok:
+            print("警告：未找到系统中文字体，PDF中文会显示方块")
+            pdf.set_font("DejaVuSans", "", 11)
+        else:
+            pdf.set_font(font_family, "", 11)
+
+        full_text = self.build_report_text()
+        page_width = pdf.w - pdf.l_margin - pdf.r_margin
+        line_height = 6
+
+        # 大标题加粗居中
+        if font_ok:
+            pdf.set_font(font_family, "B", 16)
+        pdf.multi_cell(page_width, line_height + 2, "AI医美标准化面诊报告", align="C")
+        pdf.ln(4)
+        # 切回正文常规字体
+        if font_ok:
+            pdf.set_font(font_family, "", 11)
+
+        for line in full_text.split("\n"):
+            if line.strip() == "":
+                pdf.ln(3)
+                continue
+            pdf.multi_cell(page_width, line_height, line)
+            pdf.ln(1)
+
         pdf.output(save_path)
-        if os.path.exists(tmp_txt):
-            os.remove(tmp_txt)
+        return save_path
+
+    def save_txt_report(self, save_path="report_data.txt"):
+        content = self.build_report_text()
+        with open(save_path, "w", encoding="utf-8") as f:
+            f.write(content)
         return save_path
 
     def save_report_all(self, out_dir="./report_out"):
@@ -747,9 +764,9 @@ class BeautyFaceAnalyzer:
         return {"img": p1, "txt": p2, "pdf": p3}
 
 if __name__ == "__main__":
-    # 安装依赖
+    # 安装依赖命令
     # pip install opencv-python mediapipe fpdf pillow numpy
-    image = cv2.imread("wanqian.webp")
+    image = cv2.imread("aaa.jpeg")
     if image is None:
         print("图片读取失败，请把 wanqian.webp 放到代码同目录")
     else:
