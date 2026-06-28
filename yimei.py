@@ -149,20 +149,60 @@ class BeautyFaceAnalyzer:
         }
 
     def calc_eye_nose_lip(self):
-        le_l = self.get_point(33)
-        le_r = self.get_point(133)
-        re_l = self.get_point(362)
-        re_r = self.get_point(263)
+        # 眼部关键点
+        left_eye_inner = self.get_point(33)
+        left_eye_outer = self.get_point(133)
         left_eye_top = self.get_point(145)
         left_eye_bottom = self.get_point(159)
+
+        right_eye_inner = self.get_point(362)
+        right_eye_outer = self.get_point(263)
         right_eye_top = self.get_point(374)
         right_eye_bottom = self.get_point(386)
 
+        brow_mid_left = self.get_point(234)
+        brow_mid_right = self.get_point(454)
+        fore_mid = self.get_point(9)
+
+        # 1. 眼裂长度（单眼内外眼角横向距离，左右平均）
+        left_eye_len = np.linalg.norm(left_eye_outer - left_eye_inner)
+        right_eye_len = np.linalg.norm(right_eye_outer - right_eye_inner)
+        eye_avg_len = (left_eye_len + right_eye_len) / 2
+
+        # 2. 单眼高度（上下眼睑纵向距离，左右平均）
         left_eye_h = abs(left_eye_top[1] - left_eye_bottom[1])
         right_eye_h = abs(right_eye_top[1] - right_eye_bottom[1])
-        inter_eye_dist = abs(re_l[0] - le_r[0])
-        eye_avg_w = (np.linalg.norm(le_r - le_l) + np.linalg.norm(re_r - re_l)) / 2
+        eye_avg_h = (left_eye_h + right_eye_h) / 2
 
+        # 3. 眼距：两眼内眼角横向间距
+        inter_eye_dist = abs(right_eye_inner[0] - left_eye_inner[0])
+
+        # 4. 内外眼角高低差（外眼角Y - 内眼角Y，正负代表上扬/下垂）
+        left_eye_tilt = left_eye_outer[1] - left_eye_inner[1]
+        right_eye_tilt = right_eye_outer[1] - right_eye_inner[1]
+        avg_eye_tilt = (left_eye_tilt + right_eye_tilt) / 2
+
+        # 5. 眉眼间距：眉中点到上眼睑垂直距离均值
+        left_brow_eye_dist = abs(brow_mid_left[1] - left_eye_top[1])
+        right_brow_eye_dist = abs(brow_mid_right[1] - right_eye_top[1])
+        avg_brow_eye_dist = (left_brow_eye_dist + right_brow_eye_dist) / 2
+
+        # 6. 肿眼泡区域占比：眉下到上眼皮灰度纹理凸起占比
+        h, w = self.h, self.w
+        gray = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
+        mask_eye_puff = np.zeros((h, w), np.uint8)
+        # 左右上眼皮+眉下多边形
+        left_puff = np.array([brow_mid_left, left_eye_top, left_eye_inner, left_eye_outer], np.int32)
+        right_puff = np.array([brow_mid_right, right_eye_top, right_eye_inner, right_eye_outer], np.int32)
+        cv2.fillPoly(mask_eye_puff, [left_puff, right_puff], 255)
+        blur_gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        puff_tex = cv2.absdiff(gray, blur_gray)
+        puff_roi = cv2.bitwise_and(puff_tex, puff_tex, mask=mask_eye_puff)
+        total_puff_area = np.count_nonzero(mask_eye_puff)
+        puff_std = np.std(puff_roi[puff_roi > 0])
+        eye_puff_ratio = round(np.clip(puff_std / 35, 0, 1), 3)
+
+        # -------------------------- 鼻唇原有逻辑不变 --------------------------
         forehead_mid = self.get_point(10)
         nose_tip = self.get_point(4)
         nose_left_wing = self.get_point(234)
@@ -183,18 +223,32 @@ class BeautyFaceAnalyzer:
         lower_lip_h = abs(lip_bottom_mid[1] - lip_bottom_center[1])
         philtrum = abs(lip_cupids_bow[1] - philtrum_top[1])
 
-        return {
-            "平均眼宽(占脸宽)": round(float(eye_avg_w / self.w), 3),
-            "眼间距(占脸宽)": round(float(inter_eye_dist / self.w), 3),
-            "单眼平均高度(占脸高)": round(float((left_eye_h + right_eye_h) / 2 / self.h), 3),
-            "鼻翼宽度(占脸宽)": round(float(nose_width / self.w), 3),
-            "鼻长(眉心至鼻尖/占脸高)": round(float(nose_total_vertical / self.h), 3),
-            "嘴唇宽度(占脸宽)": round(float(lip_w / self.w), 3),
-            "上唇厚度(占脸高)": round(float(upper_lip_h / self.h), 3),
-            "下唇厚度(占脸高)": round(float(lower_lip_h / self.h), 3),
-            "人中长度(占脸高)": round(float(philtrum / self.h), 3)
-        }
+        face_w = np.linalg.norm(self.get_point(PTS_IDX["right_cheek"]) - self.get_point(PTS_IDX["left_cheek"]))
+        face_h = abs(self.get_point(PTS_IDX["bottom_chin"])[1] - self.get_point(PTS_IDX["top_forehead"])[1])
 
+        return {
+            # 【新增全套眼型指标】
+            "眼裂长度(像素均值)": round(float(eye_avg_len), 1),
+            "单眼眼高(像素均值)": round(float(eye_avg_h), 1),
+            "两眼内眼角间距(像素)": round(float(inter_eye_dist), 1),
+            "内外眼角高低差(正=吊梢眼/负=下垂眼)": round(float(avg_eye_tilt), 1),
+            "眉眼垂直间距(像素均值)": round(float(avg_brow_eye_dist), 1),
+            "肿眼泡区域凸起占比(0-1越高越肿)": eye_puff_ratio,
+
+            # 原有眼比例（占脸尺寸）
+            "平均眼宽(占脸宽)": round(float(eye_avg_len / face_w), 3),
+            "眼间距(占脸宽)": round(float(inter_eye_dist / face_w), 3),
+            "单眼平均高度(占脸高)": round(float(eye_avg_h / face_h), 3),
+
+            # 鼻
+            "鼻翼宽度(占脸宽)": round(float(nose_width / face_w), 3),
+            "鼻长(眉心至鼻尖/占脸高)": round(float(nose_total_vertical / face_h), 3),
+            # 唇
+            "嘴唇宽度(占脸宽)": round(float(lip_w / face_w), 3),
+            "上唇厚度(占脸高)": round(float(upper_lip_h / face_h), 3),
+            "下唇厚度(占脸高)": round(float(lower_lip_h / face_h), 3),
+            "人中长度(占脸高)": round(float(philtrum / face_h), 3)
+        }
     def calc_face_shape(self):
         cheek_left = self.get_point(234)
         cheek_right = self.get_point(454)
