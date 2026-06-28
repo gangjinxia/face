@@ -104,23 +104,57 @@ class BeautyFaceAnalyzer:
         cv2.fillPoly(mask, [contour], 255)
         skin_bgr = cv2.bitwise_and(self.img, self.img, mask=mask)
         skin_hsv = cv2.cvtColor(skin_bgr, cv2.COLOR_BGR2HSV)
+        gray = cv2.cvtColor(skin_bgr, cv2.COLOR_BGR2GRAY)
         total_skin = np.count_nonzero(mask)
         if total_skin == 0:
-            return {"泛红面积占比":0.0, "暗沉面积占比":0.0}
+            return {
+                "泛红面积占比":0.0, "暗沉面积占比":0.0,
+                "色斑色素占比":0.0, "毛孔粗糙占比":0.0,
+                "出油高光占比":0.0, "干纹缺水占比":0.0
+            }
 
+        # 1.泛红
         red_mask = cv2.inRange(skin_hsv, (0,80,50), (20,255,255))
         red_pix = np.count_nonzero(red_mask & mask)
         red_ratio = round(float(red_pix / total_skin), 3)
 
+        # 2.暗沉
         dark_mask = cv2.inRange(skin_hsv, (0,0,0), (180,255,90))
         dark_pix = np.count_nonzero(dark_mask & mask)
         dark_ratio = round(float(dark_pix / total_skin), 3)
 
-        return {"泛红面积占比":red_ratio, "暗沉面积占比":dark_ratio}
+        # 3.色斑黄褐色
+        spot_mask = cv2.inRange(skin_hsv, (10,40,40), (35,160,160))
+        spot_pix = np.count_nonzero(spot_mask & mask)
+        spot_ratio = round(float(spot_pix / total_skin), 3)
 
-    # ==== 五官尺寸测算 ====
+        # 4.出油高光
+        oil_mask = cv2.inRange(skin_hsv, (0,0,210), (180,40,255))
+        oil_pix = np.count_nonzero(oil_mask & mask)
+        oil_ratio = round(float(oil_pix / total_skin), 3)
+
+        # 5.干纹缺水细纹
+        dry_line_mask = cv2.inRange(skin_hsv, (0,0,60), (180,70,130))
+        dry_pix = np.count_nonzero(dry_line_mask & mask)
+        dry_ratio = round(float(dry_pix / total_skin), 3)
+
+        # 6.毛孔粗糙纹理
+        blur_gray = cv2.GaussianBlur(gray, (3,3), 0)
+        pore_mask = cv2.subtract(blur_gray, gray)
+        _, pore_bin = cv2.threshold(pore_mask, 12, 255, cv2.THRESH_BINARY)
+        pore_pix = np.count_nonzero(pore_bin & mask)
+        pore_ratio = round(float(pore_pix / total_skin), 3)
+
+        return {
+            "泛红面积占比": red_ratio,
+            "暗沉面积占比": dark_ratio,
+            "色斑色素占比": spot_ratio,
+            "毛孔粗糙占比": pore_ratio,
+            "出油高光占比": oil_ratio,
+            "干纹缺水占比": dry_ratio
+        }
+
     def calc_eye_nose_lip(self):
-        # 眼部关键点
         le_l = self.get_point(33)
         le_r = self.get_point(133)
         re_l = self.get_point(362)
@@ -135,7 +169,6 @@ class BeautyFaceAnalyzer:
         inter_eye_dist = abs(re_l[0] - le_r[0])
         eye_avg_w = (np.linalg.norm(le_r - le_l) + np.linalg.norm(re_r - re_l)) / 2
 
-        # 鼻部：眉心10 → 鼻尖4 完整鼻纵向高度（医美标准）
         forehead_mid = self.get_point(10)
         nose_tip = self.get_point(4)
         nose_left_wing = self.get_point(234)
@@ -143,7 +176,6 @@ class BeautyFaceAnalyzer:
         nose_width = np.linalg.norm(nose_right_wing - nose_left_wing)
         nose_total_vertical = abs(nose_tip[1] - forehead_mid[1])
 
-        # 嘴唇
         lip_left = self.get_point(61)
         lip_right = self.get_point(291)
         lip_top_mid = self.get_point(0)
@@ -169,9 +201,7 @@ class BeautyFaceAnalyzer:
             "人中长度(占脸高)": round(float(philtrum / self.h), 3)
         }
 
-    # ===== 新增：脸型自动分类 =====
     def calc_face_shape(self):
-        # 关键点
         cheek_left = self.get_point(234)
         cheek_right = self.get_point(454)
         jaw_left = self.get_point(58)
@@ -179,12 +209,10 @@ class BeautyFaceAnalyzer:
         top_fore = self.get_point(10)
         bottom_chin = self.get_point(152)
 
-        # 宽度、长度计算
         cheek_width = np.linalg.norm(cheek_right - cheek_left)
         jaw_width = np.linalg.norm(jaw_right - jaw_left)
         face_length = abs(bottom_chin[1] - top_fore[1])
 
-        # 关键比值
         length_cheek_ratio = face_length / cheek_width
         jaw_cheek_ratio = jaw_width / cheek_width
 
@@ -208,34 +236,28 @@ class BeautyFaceAnalyzer:
         draw_img = self.img.copy()
         pts_int = self.landmarks_2d.astype(np.int32)
 
-        # 1. 绘制全部绿色关键点
         for x, y in pts_int:
             cv2.circle(draw_img, (x, y), 1, (0, 255, 0), -1)
 
-        # 2. 绘制下颌外轮廓红线
         jaw_idx = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109]
         contour = self.landmarks_2d[jaw_idx].astype(np.int32)
         cv2.polylines(draw_img, [contour], True, (0, 0, 255), 1)
 
-        # ========== 美学标准辅助线 ==========
         h, w = self.h, self.w
         fore_top_pt = self.get_point(PTS_IDX["top_forehead"])
         chin_pt = self.get_point(PTS_IDX["bottom_chin"])
 
-        # 1）面部中分对称竖线（蓝色）
         mid_x = int(self.get_point(PTS_IDX["nose_top"])[0])
         y_min = int(fore_top_pt[1])
         y_max = int(chin_pt[1])
         cv2.line(draw_img, (mid_x, y_min), (mid_x, y_max), (255, 0, 0), 1)
 
-        # 2）三庭分割水平线（橙色）
         total_face_h = chin_pt[1] - fore_top_pt[1]
         line_y1 = fore_top_pt[1] + total_face_h * (1/3)
         line_y2 = fore_top_pt[1] + total_face_h * (2/3)
         cv2.line(draw_img, (0, int(line_y1)), (w, int(line_y1)), (0, 165, 255), 1)
         cv2.line(draw_img, (0, int(line_y2)), (w, int(line_y2)), (0, 165, 255), 1)
 
-        # 3）五眼等分竖线（紫色）
         single_eye_w = w / 5
         for i in range(1, 5):
             x_pos = int(single_eye_w * i)
@@ -257,7 +279,7 @@ if __name__ == "__main__":
             res2 = analyzer.calc_symmetry_score()
             res3 = analyzer.skin_region_analysis()
             res4 = analyzer.calc_eye_nose_lip()
-            res5 = analyzer.calc_face_shape()  # 脸型分析
+            res5 = analyzer.calc_face_shape()
             print("三庭五眼：", res1)
             print("面部对称：", res2)
             print("皮肤检测：", res3)
