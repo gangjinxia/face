@@ -226,7 +226,7 @@ class BeautyFaceAnalyzer:
             "下颌宽/颧骨宽比值": round(float(jaw_cheek_ratio), 3)
         }
 
-    # 新增：泪沟、法令纹、软组织下垂、额头横纹、鱼尾纹、木偶纹衰老量化
+    # 新增：泪沟、法令纹、软组织下垂、额头横纹、鱼尾纹、木偶纹、川字纹衰老量化
     def calc_aging_depression(self):
         h, w = self.h, self.w
         gray = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
@@ -269,13 +269,10 @@ class BeautyFaceAnalyzer:
         face_top = self.get_point(PTS_IDX["top_forehead"])
         full_h = chin_mid[1] - face_top[1]
 
-        # 眉下垂偏移
         brow_offset = abs(brow_mid[1] - (face_top[1] + full_h * 0.12)) / full_h
-        # 苹果肌下垂偏移
         cheek_left_offset = abs(cheek_mid_left[1] - (face_top[1] + full_h * 0.42)) / full_h
         cheek_right_offset = abs(cheek_mid_right[1] - (face_top[1] + full_h * 0.42)) / full_h
         avg_cheek_offset = (cheek_left_offset + cheek_right_offset) / 2
-
         sag_score = round(float((brow_offset + avg_cheek_offset) / 2), 3)
 
         # ========== 4. 额头横纹 ==========
@@ -314,13 +311,26 @@ class BeautyFaceAnalyzer:
         puppet_mean = cv2.mean(puppet_roi)[0]
         puppet_wrinkle = round(float((128 - puppet_mean) / 128), 3)
 
+        # ========== 7. 眉间川字纹（新增） ==========
+        glabala_left = self.get_point(33)
+        glabala_right = self.get_point(263)
+        glabala_top = self.get_point(9)
+        glabala_bottom = self.get_point(1)
+        glabala_pts = np.array([glabala_left, glabala_right, glabala_bottom, glabala_top], np.int32)
+        glabala_mask = np.zeros((h,w), np.uint8)
+        cv2.fillPoly(glabala_mask, [glabala_pts], 255)
+        glabala_roi = cv2.bitwise_and(gray, gray, mask=glabala_mask & mask)
+        glabala_mean = cv2.mean(glabala_roi)[0]
+        glabala_wrinkle = round(float((128 - glabala_mean) / 128), 3)
+
         return {
             "泪沟凹陷程度(0-1越高越深)": lacrimal_score,
             "法令纹凹陷程度(0-1越深越重)": nasolabial_score,
             "面部软组织下垂指数(0-1越高越松弛)": sag_score,
             "额头横纹深度(0-1越深越多)": forehead_wrinkle,
             "鱼尾纹深浅指数(0-1越深越多)": crow_feet,
-            "木偶纹凹陷程度(0-1越深越重)": puppet_wrinkle
+            "木偶纹凹陷程度(0-1越深越重)": puppet_wrinkle,
+            "眉间川字纹深度(0-1越深越多)": glabala_wrinkle
         }
 
     def draw_all_landmark(self):
