@@ -118,7 +118,7 @@ class BeautyFaceAnalyzer:
 
         return {"泛红面积占比":red_ratio, "暗沉面积占比":dark_ratio}
 
-    # ==== 最终修复版五官尺寸测算方法 ====
+    # ==== 五官尺寸测算 ====
     def calc_eye_nose_lip(self):
         # 眼部关键点
         le_l = self.get_point(33)
@@ -141,7 +141,6 @@ class BeautyFaceAnalyzer:
         nose_left_wing = self.get_point(234)
         nose_right_wing = self.get_point(454)
         nose_width = np.linalg.norm(nose_right_wing - nose_left_wing)
-        # 完整鼻纵向总长（山根+鼻梁）
         nose_total_vertical = abs(nose_tip[1] - forehead_mid[1])
 
         # 嘴唇
@@ -170,6 +169,41 @@ class BeautyFaceAnalyzer:
             "人中长度(占脸高)": round(float(philtrum / self.h), 3)
         }
 
+    # ===== 新增：脸型自动分类 =====
+    def calc_face_shape(self):
+        # 关键点
+        cheek_left = self.get_point(234)
+        cheek_right = self.get_point(454)
+        jaw_left = self.get_point(58)
+        jaw_right = self.get_point(291)
+        top_fore = self.get_point(10)
+        bottom_chin = self.get_point(152)
+
+        # 宽度、长度计算
+        cheek_width = np.linalg.norm(cheek_right - cheek_left)
+        jaw_width = np.linalg.norm(jaw_right - jaw_left)
+        face_length = abs(bottom_chin[1] - top_fore[1])
+
+        # 关键比值
+        length_cheek_ratio = face_length / cheek_width
+        jaw_cheek_ratio = jaw_width / cheek_width
+
+        face_type = "鹅蛋脸"
+        if length_cheek_ratio > 1.4:
+            face_type = "长脸"
+        elif jaw_cheek_ratio > 0.92 and length_cheek_ratio < 1.25:
+            face_type = "方脸"
+        elif jaw_cheek_ratio < 0.78:
+            face_type = "菱形脸"
+        elif length_cheek_ratio < 1.15:
+            face_type = "圆脸"
+
+        return {
+            "脸型分类": face_type,
+            "脸长/颧骨宽比值": round(float(length_cheek_ratio), 3),
+            "下颌宽/颧骨宽比值": round(float(jaw_cheek_ratio), 3)
+        }
+
     def draw_all_landmark(self):
         draw_img = self.img.copy()
         pts_int = self.landmarks_2d.astype(np.int32)
@@ -183,10 +217,10 @@ class BeautyFaceAnalyzer:
         contour = self.landmarks_2d[jaw_idx].astype(np.int32)
         cv2.polylines(draw_img, [contour], True, (0, 0, 255), 1)
 
-        # ========== 新增美学标准辅助线 ==========
+        # ========== 美学标准辅助线 ==========
         h, w = self.h, self.w
-        fore_top_pt = self.get_point(PTS_IDX["top_forehead"])   # 额头最高点
-        chin_pt = self.get_point(PTS_IDX["bottom_chin"])       # 下巴最低点
+        fore_top_pt = self.get_point(PTS_IDX["top_forehead"])
+        chin_pt = self.get_point(PTS_IDX["bottom_chin"])
 
         # 1）面部中分对称竖线（蓝色）
         mid_x = int(self.get_point(PTS_IDX["nose_top"])[0])
@@ -223,10 +257,12 @@ if __name__ == "__main__":
             res2 = analyzer.calc_symmetry_score()
             res3 = analyzer.skin_region_analysis()
             res4 = analyzer.calc_eye_nose_lip()
+            res5 = analyzer.calc_face_shape()  # 脸型分析
             print("三庭五眼：", res1)
             print("面部对称：", res2)
             print("皮肤检测：", res3)
             print("五官比例数据：", res4)
+            print("脸型分析：", res5)
             show_img = analyzer.draw_all_landmark()
             cv2.imshow("医美人脸网格分析", show_img)
             cv2.waitKey(0)
