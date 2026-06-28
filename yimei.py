@@ -163,12 +163,18 @@ class BeautyFaceAnalyzer:
         brow_mid_left = self.get_point(234)
         brow_mid_right = self.get_point(454)
         fore_mid = self.get_point(9)
-        nose_root = self.get_point(1)  # 鼻根
-        nose_tip = self.get_point(4)  # 鼻尖
+        nose_root = self.get_point(1)
+        nose_tip = self.get_point(4)
         nose_left_wing = self.get_point(234)
         nose_right_wing = self.get_point(454)
         left_nose_foot = self.get_point(21)
         right_nose_foot = self.get_point(24)
+
+        # 下颌、下巴关键点
+        jaw_left_angle = self.get_point(58)
+        jaw_right_angle = self.get_point(291)
+        chin_tip = self.get_point(152)
+        mid_nose_bottom = self.get_point(4)
 
         # 1.眼型全套指标
         left_eye_len = np.linalg.norm(left_eye_outer - left_eye_inner)
@@ -217,26 +223,46 @@ class BeautyFaceAnalyzer:
         mod2 = np.linalg.norm(v2)
         nose_lip_angle = np.arccos(np.clip(dot / (mod1 * mod2), -1, 1)) * 180 / np.pi
 
-        # -------------------------- 唇部全套新增指标 --------------------------
-        lip_left = self.get_point(61)  # 左口角
-        lip_right = self.get_point(291)  # 右口角
-        lip_top_mid = self.get_point(0)  # 上唇人中顶点
-        lip_bottom_mid = self.get_point(17)  # 下唇最低点
-        lip_cupids_bow = self.get_point(13)  # 丘比特弓
+        # -------------------------- 唇部全套指标 --------------------------
+        lip_left = self.get_point(61)
+        lip_right = self.get_point(291)
+        lip_top_mid = self.get_point(0)
+        lip_bottom_mid = self.get_point(17)
+        lip_cupids_bow = self.get_point(13)
         lip_bottom_center = self.get_point(14)
         philtrum_top = self.get_point(1)
 
-        # 1.唇总长：左右口角横向距离
         lip_total_len = np.linalg.norm(lip_right - lip_left)
-        # 2.上唇厚度、下唇厚度
         upper_lip_h = abs(lip_top_mid[1] - lip_cupids_bow[1])
         lower_lip_h = abs(lip_bottom_mid[1] - lip_bottom_center[1])
-        # 3.人中长度
         philtrum_len = abs(lip_cupids_bow[1] - philtrum_top[1])
-        # 4.口角高低差：右口角Y - 左口角Y，正数右高左低，负数左高右低
         mouth_tilt = lip_right[1] - lip_left[1]
 
-        # 脸宽脸高，用于占比换算
+        # -------------------------- 【新增下颌骨骼全套指标】 --------------------------
+        # 1.下颌宽度：左右下颌角横向距离
+        jaw_width = np.linalg.norm(jaw_right_angle - jaw_left_angle)
+        # 2.下颌角角度（左右均值，标准120°~130°）
+        # 左侧下颌角向量
+        v_jaw_left_up = brow_mid_left - jaw_left_angle
+        v_jaw_left_down = chin_tip - jaw_left_angle
+        dot_left = np.dot(v_jaw_left_up, v_jaw_left_down)
+        mod_lu = np.linalg.norm(v_jaw_left_up)
+        mod_ld = np.linalg.norm(v_jaw_left_down)
+        angle_left = np.arccos(np.clip(dot_left / (mod_lu * mod_ld), -1, 1)) * 180 / np.pi
+        # 右侧下颌角向量
+        v_jaw_right_up = brow_mid_right - jaw_right_angle
+        v_jaw_right_down = chin_tip - jaw_right_angle
+        dot_right = np.dot(v_jaw_right_up, v_jaw_right_down)
+        mod_ru = np.linalg.norm(v_jaw_right_up)
+        mod_rd = np.linalg.norm(v_jaw_right_down)
+        angle_right = np.arccos(np.clip(dot_right / (mod_ru * mod_rd), -1, 1)) * 180 / np.pi
+        jaw_angle_avg = (angle_left + angle_right) / 2
+        # 3.下巴长度：鼻底中点垂直到下巴尖纵向长度
+        chin_len = abs(chin_tip[1] - mid_nose_bottom[1])
+        # 4.下巴后缩指数：鼻尖水平延长线与下巴尖横向差值，正数前突、负数后缩
+        chin_retreat = chin_tip[0] - mid_nose_bottom[0]
+
+        # 脸宽脸高基准
         face_w = np.linalg.norm(self.get_point(PTS_IDX["right_cheek"]) - self.get_point(PTS_IDX["left_cheek"]))
         face_h = abs(self.get_point(PTS_IDX["bottom_chin"])[1] - self.get_point(PTS_IDX["top_forehead"])[1])
 
@@ -250,7 +276,7 @@ class BeautyFaceAnalyzer:
             "肿眼泡区域凸起占比(0-1越高越肿)": eye_puff_ratio,
             "平均眼宽(占脸宽)": round(float(eye_avg_len / face_w), 3),
             "眼间距(占脸宽)": round(float(inter_eye_dist / face_w), 3),
-            "单眼平均高度(占脸高)": round(float(eye_avg_h / face_h), 3),
+            "单眼平均高度(占脸高)": round(float((left_eye_h + right_eye_h) / 2 / face_h), 3),
 
             # ========== 鼻部完整指标 ==========
             "鼻梁高度(像素)": round(float(bridge_height), 1),
@@ -261,7 +287,7 @@ class BeautyFaceAnalyzer:
             "鼻翼宽度(占脸宽)": round(float(nose_width / face_w), 3),
             "鼻长(眉心至鼻尖/占脸高)": round(float(nose_total_vertical / face_h), 3),
 
-            # ========== 唇部全套新增完整指标 ==========
+            # ========== 唇部完整指标 ==========
             "嘴唇总长度(左右口角像素)": round(float(lip_total_len), 1),
             "上唇厚度(像素)": round(float(upper_lip_h), 1),
             "下唇厚度(像素)": round(float(lower_lip_h), 1),
@@ -270,7 +296,15 @@ class BeautyFaceAnalyzer:
             "嘴唇宽度(占脸宽)": round(float(lip_total_len / face_w), 3),
             "上唇厚度(占脸高)": round(float(upper_lip_h / face_h), 3),
             "下唇厚度(占脸高)": round(float(lower_lip_h / face_h), 3),
-            "人中长度(占脸高)": round(float(philtrum_len / face_h), 3)
+            "人中长度(占脸高)": round(float(philtrum_len / face_h), 3),
+
+            # ========== 【新增下颌骨骼4项核心数据】 ==========
+            "下颌宽度(左右下颌角像素)": round(float(jaw_width), 1),
+            "下颌角平均角度(°，标准120-130°)": round(float(jaw_angle_avg), 1),
+            "下巴纵向长度(鼻底到下巴像素)": round(float(chin_len), 1),
+            "下巴后缩指数(负=后缩，正=前突)": round(float(chin_retreat), 1),
+            "下颌宽度(占脸宽)": round(float(jaw_width / face_w), 3),
+            "下巴长度(占脸高)": round(float(chin_len / face_h), 3)
         }
     def calc_face_shape(self):
         cheek_left = self.get_point(234)
