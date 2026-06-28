@@ -118,6 +118,58 @@ class BeautyFaceAnalyzer:
 
         return {"泛红面积占比":red_ratio, "暗沉面积占比":dark_ratio}
 
+    # ==== 新增五官尺寸测算方法 ====
+    # ==== 最终修复版五官尺寸测算方法 ====
+    def calc_eye_nose_lip(self):
+        # 眼部关键点
+        le_l = self.get_point(33)
+        le_r = self.get_point(133)
+        re_l = self.get_point(362)
+        re_r = self.get_point(263)
+        left_eye_top = self.get_point(145)
+        left_eye_bottom = self.get_point(159)
+        right_eye_top = self.get_point(374)
+        right_eye_bottom = self.get_point(386)
+
+        left_eye_h = abs(left_eye_top[1] - left_eye_bottom[1])
+        right_eye_h = abs(right_eye_top[1] - right_eye_bottom[1])
+        inter_eye_dist = abs(re_l[0] - le_r[0])
+        eye_avg_w = (np.linalg.norm(le_r - le_l) + np.linalg.norm(re_r - re_l)) / 2
+
+        # 鼻部：眉心10 → 鼻尖4 完整鼻纵向高度（医美标准）
+        forehead_mid = self.get_point(10)
+        nose_tip = self.get_point(4)
+        nose_left_wing = self.get_point(234)
+        nose_right_wing = self.get_point(454)
+        nose_width = np.linalg.norm(nose_right_wing - nose_left_wing)
+        # 完整鼻纵向总长（山根+鼻梁）
+        nose_total_vertical = abs(nose_tip[1] - forehead_mid[1])
+
+        # 嘴唇
+        lip_left = self.get_point(61)
+        lip_right = self.get_point(291)
+        lip_top_mid = self.get_point(0)
+        lip_bottom_mid = self.get_point(17)
+        lip_cupids_bow = self.get_point(13)
+        lip_bottom_center = self.get_point(14)
+        philtrum_top = self.get_point(1)
+
+        lip_w = np.linalg.norm(lip_right - lip_left)
+        upper_lip_h = abs(lip_top_mid[1] - lip_cupids_bow[1])
+        lower_lip_h = abs(lip_bottom_mid[1] - lip_bottom_center[1])
+        philtrum = abs(lip_cupids_bow[1] - philtrum_top[1])
+
+        return {
+            "平均眼宽(占脸宽)": round(float(eye_avg_w / self.w), 3),
+            "眼间距(占脸宽)": round(float(inter_eye_dist / self.w), 3),
+            "单眼平均高度(占脸高)": round(float((left_eye_h + right_eye_h) / 2 / self.h), 3),
+            "鼻翼宽度(占脸宽)": round(float(nose_width / self.w), 3),
+            "鼻长(眉心至鼻尖/占脸高)": round(float(nose_total_vertical / self.h), 3),
+            "嘴唇宽度(占脸宽)": round(float(lip_w / self.w), 3),
+            "上唇厚度(占脸高)": round(float(upper_lip_h / self.h), 3),
+            "下唇厚度(占脸高)": round(float(lower_lip_h / self.h), 3),
+            "人中长度(占脸高)": round(float(philtrum / self.h), 3)
+        }
     def draw_all_landmark(self):
         draw_img = self.img.copy()
         pts_int = self.landmarks_2d.astype(np.int32)
@@ -141,9 +193,11 @@ if __name__ == "__main__":
             res1 = analyzer.calc_three_court_five_eye()
             res2 = analyzer.calc_symmetry_score()
             res3 = analyzer.skin_region_analysis()
+            res4 = analyzer.calc_eye_nose_lip() # 调用五官测算
             print("三庭五眼：", res1)
             print("面部对称：", res2)
             print("皮肤检测：", res3)
+            print("五官比例数据：", res4)
             show_img = analyzer.draw_all_landmark()
             cv2.imshow("医美人脸网格分析", show_img)
             cv2.waitKey(0)
