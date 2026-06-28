@@ -113,32 +113,26 @@ class BeautyFaceAnalyzer:
                 "出油高光占比":0.0, "干纹缺水占比":0.0
             }
 
-        # 1.泛红
         red_mask = cv2.inRange(skin_hsv, (0,80,50), (20,255,255))
         red_pix = np.count_nonzero(red_mask & mask)
         red_ratio = round(float(red_pix / total_skin), 3)
 
-        # 2.暗沉
         dark_mask = cv2.inRange(skin_hsv, (0,0,0), (180,255,90))
         dark_pix = np.count_nonzero(dark_mask & mask)
         dark_ratio = round(float(dark_pix / total_skin), 3)
 
-        # 3.色斑黄褐色
         spot_mask = cv2.inRange(skin_hsv, (10,40,40), (35,160,160))
         spot_pix = np.count_nonzero(spot_mask & mask)
         spot_ratio = round(float(spot_pix / total_skin), 3)
 
-        # 4.出油高光
         oil_mask = cv2.inRange(skin_hsv, (0,0,210), (180,40,255))
         oil_pix = np.count_nonzero(oil_mask & mask)
         oil_ratio = round(float(oil_pix / total_skin), 3)
 
-        # 5.干纹缺水细纹
         dry_line_mask = cv2.inRange(skin_hsv, (0,0,60), (180,70,130))
         dry_pix = np.count_nonzero(dry_line_mask & mask)
         dry_ratio = round(float(dry_pix / total_skin), 3)
 
-        # 6.毛孔粗糙纹理
         blur_gray = cv2.GaussianBlur(gray, (3,3), 0)
         pore_mask = cv2.subtract(blur_gray, gray)
         _, pore_bin = cv2.threshold(pore_mask, 12, 255, cv2.THRESH_BINARY)
@@ -232,6 +226,61 @@ class BeautyFaceAnalyzer:
             "下颌宽/颧骨宽比值": round(float(jaw_cheek_ratio), 3)
         }
 
+    # 新增：泪沟、法令纹、软组织下垂衰老量化
+    def calc_aging_depression(self):
+        h, w = self.h, self.w
+        gray = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
+        mask = np.zeros((h, w), dtype=np.uint8)
+        jaw_idx = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109]
+        contour = self.landmarks_2d[jaw_idx].astype(np.int32)
+        cv2.fillPoly(mask, [contour], 255)
+
+        # 泪沟区域
+        left_eye_inner = self.get_point(33)
+        left_cheek_up = self.get_point(234)
+        right_eye_inner = self.get_point(263)
+        right_cheek_up = self.get_point(454)
+        left_lacrimal_pts = np.array([left_eye_inner, self.get_point(145), left_cheek_up], np.int32)
+        right_lacrimal_pts = np.array([right_eye_inner, self.get_point(374), right_cheek_up], np.int32)
+        lacrimal_mask = np.zeros((h,w), np.uint8)
+        cv2.fillPoly(lacrimal_mask, [left_lacrimal_pts, right_lacrimal_pts], 255)
+        lacrimal_roi = cv2.bitwise_and(gray, gray, mask=lacrimal_mask & mask)
+        lacrimal_mean = cv2.mean(lacrimal_roi)[0]
+        lacrimal_score = round(float((128 - lacrimal_mean) / 128), 3)
+
+        # 法令纹区域
+        nose_left = self.get_point(234)
+        mouth_left = self.get_point(61)
+        nose_right = self.get_point(454)
+        mouth_right = self.get_point(291)
+        left_nasolabial = np.array([nose_left, self.get_point(1), mouth_left], np.int32)
+        right_nasolabial = np.array([nose_right, self.get_point(4), mouth_right], np.int32)
+        nasolabial_mask = np.zeros((h,w), np.uint8)
+        cv2.fillPoly(nasolabial_mask, [left_nasolabial, right_nasolabial], 255)
+        nl_roi = cv2.bitwise_and(gray, gray, mask=nasolabial_mask & mask)
+        nl_mean = cv2.mean(nl_roi)[0]
+        nasolabial_score = round(float((128 - nl_mean) / 128), 3)
+
+        # 软组织下垂
+        brow_mid = self.get_point(PTS_IDX["brow_top"])
+        cheek_mid_left = self.get_point(234)
+        cheek_mid_right = self.get_point(454)
+        chin_mid = self.get_point(PTS_IDX["bottom_chin"])
+        face_top = self.get_point(PTS_IDX["top_forehead"])
+        full_h = chin_mid[1] - face_top[1]
+
+        brow_offset = abs(brow_mid[1] - (face_top[1] + full_h * 0.12)) / full_h
+        cheek_left_offset = abs(cheek_mid_left[1] - (face_top[1] + full_h * 0.42)) / full_h
+        cheek_right_offset = abs(cheek_mid_right[1] - (face_top[1] + full_h * 0.42)) / full_h
+        avg_cheek_offset = (cheek_left_offset + cheek_right_offset) / 2
+        sag_score = round(float((brow_offset + avg_cheek_offset) / 2), 3)
+
+        return {
+            "泪沟凹陷程度(0-1越高越深)": lacrimal_score,
+            "法令纹凹陷程度(0-1越深越重)": nasolabial_score,
+            "面部软组织下垂指数(0-1越高越松弛)": sag_score
+        }
+
     def draw_all_landmark(self):
         draw_img = self.img.copy()
         pts_int = self.landmarks_2d.astype(np.int32)
@@ -280,11 +329,13 @@ if __name__ == "__main__":
             res3 = analyzer.skin_region_analysis()
             res4 = analyzer.calc_eye_nose_lip()
             res5 = analyzer.calc_face_shape()
+            res6 = analyzer.calc_aging_depression()
             print("三庭五眼：", res1)
             print("面部对称：", res2)
             print("皮肤检测：", res3)
             print("五官比例数据：", res4)
             print("脸型分析：", res5)
+            print("衰老松弛检测：", res6)
             show_img = analyzer.draw_all_landmark()
             cv2.imshow("医美人脸网格分析", show_img)
             cv2.waitKey(0)
